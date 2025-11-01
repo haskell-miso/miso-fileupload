@@ -2,6 +2,8 @@
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TypeOperators     #-}
 {-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
@@ -23,9 +25,18 @@ import           Prelude hiding ((!!), null, unlines)
 ----------------------------------------------------------------------------
 import           Miso hiding ((<#))
 import qualified Miso as M
+import qualified Miso.Html.Property as M
+import qualified Miso.Html.Element as M
+import qualified Miso.Html.Event as M
 import           Miso.Lens ((.=), Lens, lens)
 import           Miso.String (MisoString, unlines, null, ms)
-import qualified Miso.Style as CSS
+import qualified Miso.CSS as CSS
+----------------------------------------------------------------------------
+import           Data.Proxy
+import           Servant.Miso.Client
+import           Servant.API hiding (contentType)
+----------------------------------------------------------------------------
+import           APISpec
 ----------------------------------------------------------------------------
 -- | Model
 newtype Model
@@ -40,11 +51,11 @@ info = lens _info $ \r x -> r { _info = x }
 -- | Action
 data Action
   = ReadFile JSVal
-  | UploadFile MisoString JSVal
+  | UploadFile MisoString File
   | SetContent MisoString
   | ClickInput JSVal
   | PrintSuccess
-  | PrintFail MisoString
+  | PrintFail (Response MisoString)
 ----------------------------------------------------------------------------
 -- | WASM support
 #ifdef WASM
@@ -53,7 +64,7 @@ foreign export javascript "hs_start" main :: IO ()
 ----------------------------------------------------------------------------
 -- | Main entry point
 main :: IO ()
-main = run (startApp app)
+main = run $ startComponent uploadComponent
 ----------------------------------------------------------------------------
 -- | Custom styling
 css :: MisoString
@@ -75,9 +86,11 @@ css = unlines
   , "}"
   ]
 ----------------------------------------------------------------------------
--- | Miso application
-app :: App Model Action
-app = (component (Model mempty) updateModel viewModel)
+-- | Miso component
+type UploadComponent = App Model Action
+
+uploadComponent :: UploadComponent
+uploadComponent = component (Model mempty) updateModel viewModel
 #ifndef WASM
   { styles =
       [ Style css
@@ -86,11 +99,26 @@ app = (component (Model mempty) updateModel viewModel)
   }
 #endif
 ----------------------------------------------------------------------------
+-- | Servant API client
+componentProxy :: Proxy UploadComponent
+componentProxy = Proxy
+
+apiProxy :: Proxy (UploadAPI MisoString File)
+apiProxy = Proxy
+
+uploadClient
+  :: (Maybe MisoString)
+  -> File
+  -> (Response () -> Action)
+  -> (Response MisoString -> Action)
+  -> Transition Model Action
+uploadClient = toClient "http://localhost:8000" componentProxy apiProxy
+----------------------------------------------------------------------------
 -- | Update function
 updateModel :: Action -> Transition Model Action
 updateModel (ReadFile input) = M.withSink $ \sink -> do
   files_ <- files input
-  reader <- J.new (J.jsg ("FileReader" :: MisoString)) ([] :: [JSVal])
+  reader <- newFileReader
   (reader <# ("onload" :: MisoString)) =<< do
     M.asyncCallback $ do
       result <- J.fromJSValUnchecked =<< reader ! ("result" :: MisoString)
@@ -99,25 +127,18 @@ updateModel (ReadFile input) = M.withSink $ \sink -> do
     [] -> consoleLog "No file specified"
     file : _ -> do
       name <- J.valToStr =<< file ! ("name" :: MisoString)
-      sink $ UploadFile (ms name) file
+      sink $ UploadFile (ms name) (File file)
       void $ reader # ("readAsText" :: MisoString) $ [file]
 updateModel (UploadFile n f) =
-  fetch
-    "http://localhost:8000/upload"
-    "POST"
-    (Just f)
-    [ accept =: applicationJSON,
-      contentType =: "application/octet-stream",
-      "Content-Name" =: n ]
-    (const PrintSuccess :: Int -> Action)
-    PrintFail
+  uploadClient (Just n) f (const PrintSuccess) PrintFail
 updateModel (SetContent c) =
   info .= c
 updateModel (ClickInput button) = io_ $ do
   input <- nextSibling button
   input & click ()
 updateModel PrintSuccess = io_ $ consoleLog "File uploaded successfully!"
-updateModel (PrintFail err) = io_ . consoleLog $ "File upload failed: " <> err
+updateModel (PrintFail (Response _ _ _ body)) =
+  io_ . consoleLog $ "File upload failed: " <> body
 ----------------------------------------------------------------------------
 -- | View function
 viewModel :: Model -> View Model Action
