@@ -43,13 +43,11 @@ executable server
   build-depends:
     base,
     bytestring,
-    case-insensitive,
     directory,
     servant,
     servant-server,
     text,
     wai,
-    wai-cors,
     warp
   hs-source-dirs:
     server

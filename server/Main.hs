@@ -16,12 +16,10 @@ module Main where
 import Control.Monad.IO.Class
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
-import Data.CaseInsensitive (mk)
 import Data.Proxy
 import qualified Data.Text as T
 import Network.Wai
 import Network.Wai.Handler.Warp
-import Network.Wai.Middleware.Cors
 import Servant
 import Servant.API
 import System.Directory
@@ -47,12 +45,7 @@ server = uploadServer :<|> staticServer
 -----------------------------------------------------------------------------
 -- | Define and run app
 app :: Application
-app = mw $ serve api server
-  where
-    mw = cors . const . Just $ 
-        simpleCorsResourcePolicy {
-          corsRequestHeaders = [ mk $ C.pack "Content-Type" ]
-        }
+app = serve api server
 
 main :: IO ()
 main = putStrLn "Serving at http://localhost:8000/index.html" >> run 8000 app
