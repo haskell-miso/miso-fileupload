@@ -1,4 +1,4 @@
-# :ramen: 📁⬆️ miso-fileupload
+# :ramen: 📁 ⬆️ miso-fileupload
 
 This fork of [miso-filereader](https://github.com/haskell-miso/miso-filereader)
 connects to a Servant server that receives file uploads.
